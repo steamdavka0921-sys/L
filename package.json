@@ -1,0 +1,6 @@
+{
+  "name": "bot",
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
