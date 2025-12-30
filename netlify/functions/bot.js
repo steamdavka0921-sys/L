@@ -1,36 +1,68 @@
 const https = require('https');
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 200, body: "Method Not Allowed" };
+  if (event.httpMethod !== "POST") return { statusCode: 200, body: "OK" };
+
   const update = JSON.parse(event.body);
   const TOKEN = process.env.BOT_TOKEN;
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
 
-  const sendMessage = (chatId, text, markup = null) => {
-    const data = JSON.stringify({ chat_id: chatId, text: text, reply_markup: markup });
+  // Мессеж илгээх функц
+  const sendMessage = (chatId, text, replyMarkup = null) => {
+    const payload = {
+      chat_id: chatId,
+      text: text
+    };
+    if (replyMarkup) {
+      payload.reply_markup = JSON.stringify(replyMarkup);
+    }
+
+    const data = JSON.stringify(payload);
     const options = {
       hostname: 'api.telegram.org',
       port: 443,
       path: `/bot${TOKEN}/sendMessage`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
     };
+
     return new Promise((resolve) => {
-      const req = https.request(options);
+      const req = https.request(options, (res) => resolve());
       req.write(data);
-      req.end(() => resolve());
+      req.end();
     });
   };
 
   try {
-    if (update.message?.text === "/start") {
-      await sendMessage(update.message.chat.id, "💰 Цэнэглэх товчийг дарна уу.", {
-        inline_keyboard: [[{ text: "💰 Цэнэглэх", callback_data: "recharge" }]]
-      });
+    // Хэрэглэгч /start дарахад
+    if (update.message && update.message.text === "/start") {
+      const keyboard = {
+        inline_keyboard: [[
+          { text: "💰 Цэнэглэх", callback_data: "recharge_now" }
+        ]]
+      };
+      await sendMessage(update.message.chat.id, "Сайн байна уу? Доорх товчийг дарж хүсэлтээ илгээнэ үү:", keyboard);
     }
-    if (update.callback_query?.data === "recharge") {
-      await sendMessage(ADMIN_ID, `🔔 МЭДЭГДЭЛ: @${update.callback_query.from.username || 'user'} цэнэглэх хүсэлт гаргалаа!`);
+
+    // Товчлуур дарахад (Callback query)
+    if (update.callback_query) {
+      const user = update.callback_query.from;
+      const callbackData = update.callback_query.data;
+
+      if (callbackData === "recharge_now") {
+        // Админд мэдэгдэл илгээх
+        await sendMessage(ADMIN_ID, `🔔 ШИНЭ ХҮСЭЛТ:\n\nХэрэглэгч: ${user.first_name}\nID: ${user.id}\nUsername: @${user.username || 'байхгүй'}`);
+        
+        // Хэрэглэгчид хариу өгөх
+        await sendMessage(user.id, "✅ Таны хүсэлтийг хүлээн авлаа. Түр хүлээнэ үү.");
+      }
     }
-  } catch (e) { console.error(e); }
+  } catch (error) {
+    console.error("Error:", error);
+  }
+
   return { statusCode: 200, body: "ok" };
 };
