@@ -4,37 +4,58 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 200, body: "OK" };
 
   let update;
-  try { update = JSON.parse(event.body); } catch (e) { return { statusCode: 200 }; }
+  try {
+    update = JSON.parse(event.body);
+  } catch (e) {
+    return { statusCode: 200, body: "Invalid JSON" };
+  }
 
   const TOKEN = process.env.BOT_TOKEN;
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
   const FIREBASE_ID = process.env.FIREBASE_PROJECT_ID;
 
+  // Telegram API-тай харилцах функц
   const callTelegram = (method, params) => {
     const data = JSON.stringify(params);
     return new Promise((resolve) => {
       const options = {
-        hostname: 'api.telegram.org', port: 443, path: `/bot${TOKEN}/${method}`, method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${TOKEN}/${method}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data)
+        }
       };
-      const req = https.request(options, (res) => resolve());
+      const req = https.request(options, (res) => {
+        let resBody = '';
+        res.on('data', (d) => resBody += d);
+        res.on('end', () => resolve(JSON.parse(resBody || '{}')));
+      });
+      req.on('error', () => resolve({}));
       req.write(data);
       req.end();
     });
   };
 
+  // Firestore-той харилцах функц
   const callFirestore = (method, path, body = null) => {
     const data = body ? JSON.stringify(body) : null;
     return new Promise((resolve) => {
       const options = {
-        hostname: 'firestore.googleapis.com', port: 443, path: `/v1/projects/${FIREBASE_ID}/databases/(default)/documents${path}`,
-        method: method, headers: data ? { 'Content-Type': 'application/json' } : {}
+        hostname: 'firestore.googleapis.com',
+        port: 443,
+        path: `/v1/projects/${FIREBASE_ID}/databases/(default)/documents${path}`,
+        method: method,
+        headers: data ? { 'Content-Type': 'application/json' } : {}
       };
       const req = https.request(options, (res) => {
         let resBody = '';
         res.on('data', (d) => resBody += d);
-        res.on('end', () => { try { resolve(JSON.parse(resBody)); } catch(e) { resolve({}); } });
+        res.on('end', () => resolve(JSON.parse(resBody || '{}')));
       });
+      req.on('error', () => resolve({}));
       if (data) req.write(data);
       req.end();
     });
@@ -59,7 +80,7 @@ exports.handler = async (event) => {
         await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Төлбөрийг хүлээн авлаа. Админ шалгаж байна..." });
         await callTelegram('sendMessage', { 
           chat_id: ADMIN_ID, 
-          text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\nID: ${parts[1]}\nКод: ${parts[2]}\nUser: @${cb.from.username || 'unknown'}`
+          text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${parts[1]}\n📌 Код: ${parts[2]}\n👤 User: @${cb.from.username || 'unknown'}`
         });
       }
 
@@ -82,18 +103,15 @@ exports.handler = async (event) => {
             ]
           }
         });
-        return { statusCode: 200 };
-      }
-
-      // Тоо ирэх үед (ID эсвэл Татах код)
-      if (!isNaN(text)) {
-        if (text.length >= 7) { // ID гэж үзэх
+      } else if (!isNaN(text)) {
+        if (text.length >= 7) { // Цэнэглэх ID
           const searchRes = await callFirestore('GET', '/requests');
           let trxCode = "";
           const existing = (searchRes.documents || []).find(d => d.fields.gameId.stringValue === text);
 
-          if (existing) trxCode = existing.fields.trxCode.stringValue;
-          else {
+          if (existing) {
+            trxCode = existing.fields.trxCode.stringValue;
+          } else {
             const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
             for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
             await callFirestore('POST', '/requests', {
@@ -101,7 +119,26 @@ exports.handler = async (event) => {
             });
           }
 
-          const payMsg = `Нийт төлөх дүн: (Та дүнгээ өөрөө шийднэ үү)\n\n🏦 Данс: MN370050099105952353\n🏦 МОБИФИНАНС MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ АНХААР АНХААР:\nЯМАР НЭГ ТОО УТАСНЫ ДУГАААР ID БИЧВЭЛ ДЭПО ОРОХГҮЙ\n\nДанс солигдох тул асууж хийгээрэй 🤗`;
+          const payMsg = `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ Зөвхөн кодыг бичээрэй!`;
+          await callTelegram('sendMessage', {
+            chat_id: chatId, text: payMsg,
+            reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]] }
+          });
+        } else { // Татах хүсэлт
+          await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Татах хүсэлт бүртгэгдлээ. Админ шалгаж байна." });
+          await callTelegram('sendMessage', { 
+            chat_id: ADMIN_ID, 
+            text: `⚠️ ТАТАХ ХҮСЭЛТ!\n📝 Мэдээлэл: ${text}\n👤 User: @${update.message.from.username || 'unknown'}` 
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error:", err);
+  }
+
+  return { statusCode: 200, body: "OK" };
+};          const payMsg = `Нийт төлөх дүн: (Та дүнгээ өөрөө шийднэ үү)\n\n🏦 Данс: MN370050099105952353\n🏦 МОБИФИНАНС MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ АНХААР АНХААР:\nЯМАР НЭГ ТОО УТАСНЫ ДУГАААР ID БИЧВЭЛ ДЭПО ОРОХГҮЙ\n\nДанс солигдох тул асууж хийгээрэй 🤗`;
           
           await callTelegram('sendMessage', {
             chat_id: chatId, text: payMsg,
