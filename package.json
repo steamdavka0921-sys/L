@@ -1,6 +1,9 @@
 {
-  "name": "bot",
-  "dependencies": {
-    "node-fetch": "^2.6.7"
-  }
+  "name": "telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot on Netlify",
+  "main": "netlify/functions/bot.js",
+  "dependencies": {},
+  "author": "",
+  "license": "ISC"
 }
