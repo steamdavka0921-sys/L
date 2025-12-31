@@ -19,6 +19,7 @@ exports.handler = async (event) => {
           try { resolve(JSON.parse(body)); } catch (e) { resolve({}); }
         });
       });
+      req.on('error', () => resolve({}));
       if (data) req.write(data);
       req.end();
     });
@@ -34,22 +35,41 @@ exports.handler = async (event) => {
   };
 
   try {
-    // 1. Товчлуур дарах үйлдэл
+    // 1. ТОГЧЛУУР ДАРАХ ҮЙЛДЛИЙГ ШАЛГАХ (Callback Query)
     if (update.callback_query) {
       const callbackData = update.callback_query.data;
       const chatId = update.callback_query.message.chat.id;
+      const user = update.callback_query.from;
+
+      // "💰 Цэнэглэх" товч
       if (callbackData === "ask_id") {
         await sendMessage(chatId, "Та MELBET ID-гаа бичиж илгээнэ үү:");
       } 
+      
+      // "✅ Төлбөр төлсөн" товч
       if (callbackData.startsWith("paid_")) {
         const parts = callbackData.split("_");
+        const mId = parts[1];
+        const code = parts[2];
+
         await sendMessage(chatId, "✅ Баярлалаа. Таны төлбөрийг админ шалгаж байна. Түр хүлээнэ үү.");
-        await sendMessage(ADMIN_ID, `💰 ТӨЛБӨР ТӨЛӨГДӨВ!\n\n🆔 MELBET ID: ${parts[1]}\n📌 Код: ${parts[2]}\n👤 Хэрэглэгч: @${update.callback_query.from.username || 'байхгүй'}`);
+        
+        const adminMsg = `💰 ТӨЛБӨР ТӨЛӨГДӨВ!\n\n🆔 MELBET ID: ${mId}\n📌 Код: ${code}\n👤 Хэрэглэгч: @${user.username || 'байхгүй'}\n📞 Нэр: ${user.first_name}`;
+        await sendMessage(ADMIN_ID, adminMsg);
       }
-      return { statusCode: 200 };
+      
+      // Telegram-д товчлуур дарагдсан гэдгийг мэдэгдэх (Энэ нь "Loading" эргэхийг зогсооно)
+      const answerData = JSON.stringify({ callback_query_id: update.callback_query.id });
+      await httpRequest({
+        hostname: 'api.telegram.org', port: 443, method: 'POST',
+        path: `/bot${TOKEN}/answerCallbackQuery`,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(answerData) }
+      }, answerData);
+
+      return { statusCode: 200, body: "ok" };
     }
 
-    // 2. ID бичих үйлдэл
+    // 2. МЕССЕЖ ИРЭХ ҮЙЛДЭЛ
     if (update.message && update.message.text) {
       const chatId = update.message.chat.id;
       const text = update.message.text.trim();
@@ -59,30 +79,25 @@ exports.handler = async (event) => {
           inline_keyboard: [[{ text: "💰 Цэнэглэх", callback_data: "ask_id" }]]
         });
       } else {
-        const melbetId = text;
         const firestorePath = `/v1/projects/${FIREBASE_ID}/databases/(default)/documents/requests`;
-        
-        // Firestore-оос энэ ID-г хайх
         const searchRes = await httpRequest({
           hostname: 'firestore.googleapis.com', port: 443, method: 'GET',
           path: firestorePath
         });
 
         let trxCode = "";
-        const existingDoc = searchRes.documents?.find(doc => doc.fields.gameId.stringValue === melbetId);
+        const existingDoc = searchRes.documents?.find(doc => doc.fields.gameId.stringValue === text);
 
         if (existingDoc) {
           trxCode = existingDoc.fields.trxCode.stringValue;
         } else {
-          // Шинээр код үүсгэх
           const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
           for (let i = 0; i < 5; i++) {
             trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
           }
-          // Firestore-д хадгалах
           const saveData = JSON.stringify({
             fields: {
-              gameId: { stringValue: melbetId },
+              gameId: { stringValue: text },
               trxCode: { stringValue: trxCode },
               createdAt: { timestampValue: new Date().toISOString() }
             }
@@ -97,11 +112,14 @@ exports.handler = async (event) => {
         const paymentMsg = `Нийт төлөх дүн: (Та дүнгээ өөрөө шийднэ үү)\n\n🏦 Данс: MN370050099105952353\n🏦 МОБИФИНАНС MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ АНХААР АНХААР:\nГүйлгээний утга дээр зөвхөн ${trxCode} кодыг бичнэ үү. Өөр зүйл бичвэл ДЭПО орохгүй!\n\nДанс солигдох тул асууж хийгээрэй 🤗`;
 
         await sendMessage(chatId, paymentMsg, {
-          inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${melbetId}_${trxCode}` }]]
+          inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]]
         });
       }
     }
   } catch (err) { console.error(err); }
+
+  return { statusCode: 200, body: "ok" };
+};  } catch (err) { console.error(err); }
 
   return { statusCode: 200 };
 };
