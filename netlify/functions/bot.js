@@ -14,6 +14,7 @@ exports.handler = async (event) => {
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
   const FIREBASE_ID = process.env.FIREBASE_PROJECT_ID;
 
+  // Telegram-руу мессеж илгээх функц
   const sendMessage = (chatId, text, replyMarkup = null) => {
     const payload = { chat_id: chatId, text: text };
     if (replyMarkup) payload.reply_markup = JSON.stringify(replyMarkup);
@@ -38,10 +39,11 @@ exports.handler = async (event) => {
   };
 
   try {
-    // 1. Товчлуур дарах үйлдэл (Callback Query)
+    // A. ТОГЧЛУУР ДАРАХ ҮЙЛДЭЛ (Callback Query)
     if (update.callback_query) {
       const callbackData = update.callback_query.data;
       const chatId = update.callback_query.message.chat.id;
+      const user = update.callback_query.from;
 
       if (callbackData === "ask_id") {
         await sendMessage(chatId, "Та MELBET ID-гаа бичиж илгээнэ үү:");
@@ -49,13 +51,19 @@ exports.handler = async (event) => {
       
       if (callbackData.startsWith("paid_")) {
         const parts = callbackData.split("_");
+        const mId = parts[1];
+        const code = parts[2];
+
         await sendMessage(chatId, "✅ Баярлалаа. Таны төлбөрийг админ шалгаж байна. Түр хүлээнэ үү.");
-        await sendMessage(ADMIN_ID, `💰 ТӨЛБӨР ТӨЛӨВДӨВ!\nID: ${parts[1]}\nКод: ${parts[2]}\nUser: @${update.callback_query.from.username || 'байхгүй'}`);
+        
+        // АДМИН-РУУ МЭДЭГДЭЛ ИЛГЭЭХ
+        const adminMsg = `💰 ТӨЛБӨР ТӨЛӨГДӨВ!\n\n🆔 MELBET ID: ${mId}\n📌 Код: ${code}\n👤 Хэрэглэгч: @${user.username || 'байхгүй'}\n📞 Нэр: ${user.first_name}`;
+        await sendMessage(ADMIN_ID, adminMsg);
       }
       return { statusCode: 200, body: "ok" };
     }
 
-    // 2. Мессеж бичих үйлдэл
+    // B. МЕССЕЖ ИРЭХ ҮЙЛДЭЛ
     if (update.message && update.message.text) {
       const chatId = update.message.chat.id;
       const text = update.message.text;
@@ -65,60 +73,22 @@ exports.handler = async (event) => {
           inline_keyboard: [[{ text: "💰 Цэнэглэх", callback_data: "ask_id" }]]
         });
       } else {
-        // ID бичсэн гэж үзэх
-        const trxCode = Math.random().toString(36).substring(2, 7).toUpperCase().replace(/[0O1I]/g, 'X');
-        const paymentMsg = `Нийт төлөх дүн: (Та дүнгээ өөрөө шийднэ үү)\n\n🏦 Данс: MN370050099105952353\n🏦 МОБИФИНАНС MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ АНХААР АНХААР:\nГүйлгээний утга дээр зөвхөн ${trxCode} кодыг бичнэ үү. Өөр зүйл бичвэл ДЭПО орохгүй!\n\nДанс солигдох тул асууж хийгээрэй 🤗`;
+        // Хэрэглэгч ID бичсэн үед гүйлгээний утга үүсгэх (1, I, 0, O хассан)
+        const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+        let trxCode = "";
+        for (let i = 0; i < 5; i++) {
+          trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+
+        const paymentMsg = `Нийт төлөх дүн: (Та дүнгээ өөрөө шийднэ үү)\n\n🏦 Данс: MN370050099105952353\n🏦 МОБИФИНАНС MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ АНХААР АНХААР:\nГүйлгээний утга дээр зөвхөн ${trxCode} кодыг бичнэ үү. Өөр зүйл (утасны дугаар, ID гэх мэт) бичвэл ДЭПО орохгүй!\n\nДанс солигдох тул асууж хийгээрэй 🤗`;
 
         await sendMessage(chatId, paymentMsg, {
-          inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]]
+          inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text.trim()}_${trxCode}` }]]
         });
       }
     }
   } catch (err) {
-    console.error(err);
-  }
-
-  return { statusCode: 200, body: "ok" };
-};          }, saveData);
-        }
-
-        const paymentMsg = `Нийт төлөх дүн: (Та дүнгээ өөрөө шийднэ үү)\n\n🏦 Данс: MN370050099105952353\n🏦 МОБИФИНАНС MONPAY: ДАВААСҮРЭН\n\n📌 Гүйлгээний утга: ${trxCode}\n\n⚠️ АНХААР АНХААР:\nГүйлгээний утга дээр зөвхөн ${trxCode} кодыг бичнэ үү. Өөр зүйл бичвэл ДЭПО орохгүй!\n\nДанс солигдох тул асууж хийгээрэй 🤗`;
-
-        await sendMessage(chatId, paymentMsg, {
-          inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${melbetId}_${trxCode}` }]]
-        });
-      }
-    }
-  } catch (error) {
-    console.error("Error:", error);
-  }
-
-  return { statusCode: 200, body: "ok" };
-};      });
-    }
-
-    // 3. "Төлбөр төлсөн" товч дарахад
-    if (callbackQuery?.data.startsWith("paid_")) {
-      const info = callbackQuery.data.split("_");
-      const mId = info[1];
-      const code = info[2];
-      const user = callbackQuery.from;
-
-      // Хэрэглэгчид хариу өгөх
-      await sendMessage(user.id, "✅ Баярлалаа. Таны төлбөрийг админ шалгаж байна. Түр хүлээнэ үү.");
-
-      // Админд мэдэгдэл илгээх
-      const adminMsg = `💰 ТӨЛБӨР ТӨЛӨГДӨВ!\n\n` +
-        `🆔 MELBET ID: ${mId}\n` +
-        `📌 Код: ${code}\n` +
-        `👤 Хэрэглэгч: @${user.username || 'username байхгүй'}\n` +
-        `📞 Нэр: ${user.first_name}`;
-
-      await sendMessage(ADMIN_ID, adminMsg);
-    }
-
-  } catch (error) {
-    console.error("Error:", error);
+    console.error("Error in handler:", err);
   }
 
   return { statusCode: 200, body: "ok" };
