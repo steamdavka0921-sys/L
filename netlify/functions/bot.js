@@ -46,27 +46,61 @@ exports.handler = async (event) => {
     const chatId = update.message ? update.message.chat.id : (update.callback_query ? update.callback_query.message.chat.id : null);
     if (!chatId) return { statusCode: 200 };
 
-    // 1. Товчлуур дарах
+    // 1. CALLBACK QUERIES (Товчлуур дарах)
     if (update.callback_query) {
       const cb = update.callback_query;
-      if (cb.data === "menu_deposit") {
+      const data = cb.data;
+
+      // Хэрэглэгчийн товчлуурнууд
+      if (data === "menu_deposit") {
         await callTelegram('sendMessage', { chat_id: chatId, text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" });
       } 
-      else if (cb.data === "menu_withdraw") {
+      else if (data === "menu_withdraw") {
         await callTelegram('sendMessage', { chat_id: chatId, text: "💳 Татах хүсэлт:\n\nТа MELBET ID болон Таталтын кодоо хамт бичнэ үү.\nЖишээ нь: 984210857 XUFD" });
       }
-      else if (cb.data.startsWith("paid_")) {
-        const parts = cb.data.split("_");
+      else if (data.startsWith("paid_")) {
+        const [_, gId, tCode] = data.split("_");
         await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Төлбөрийг хүлээн авлаа. Админ шалгаж байна..." });
+        
+        // Админд товчлууртай мэдэгдэл илгээх
         await callTelegram('sendMessage', { 
           chat_id: ADMIN_ID, 
-          text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${parts[1]}\n📌 Код: ${parts[2]}\n👤 User: @${cb.from.username || 'unknown'}`
+          text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${gId}\n📌 Код: ${tCode}\n👤 User: @${cb.from.username || 'unknown'}`,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "✅ Зөвшөөрөх", callback_data: `adm_ok_dep_${chatId}_${gId}` },
+              { text: "❌ Татгалзах", callback_data: `adm_no_dep_${chatId}_${gId}` }
+            ]]
+          }
         });
       }
+
+      // АДМИНЫ УДИРДЛАГА (Зөвшөөрөх / Татгалзах)
+      else if (data.startsWith("adm_")) {
+        const [_, status, type, userId, targetId] = data.split("_");
+        const isApprove = status === "ok";
+        const typeText = type === "dep" ? "Цэнэглэлт" : "Таталт";
+        const finalStatus = isApprove ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
+
+        // Хэрэглэгчид мэдэгдэл илгээх
+        await callTelegram('sendMessage', {
+          chat_id: userId,
+          text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай ${typeText} хүсэлтийг админ ${finalStatus} болголоо.`
+        });
+
+        // Админы мессежийг засах (Товчлуурыг арилгах)
+        await callTelegram('editMessageText', {
+          chat_id: ADMIN_ID,
+          message_id: cb.message.message_id,
+          text: `🏁 ШИЙДВЭРЛЭГДЭВ:\nтөрөл: ${typeText}\nID: ${targetId}\nТөлөв: ${finalStatus}`
+        });
+      }
+
+      await callTelegram('answerCallbackQuery', { callback_query_id: cb.id });
       return { statusCode: 200 };
     }
 
-    // 2. Текст бичих
+    // 2. TEXT MESSAGES
     if (update.message && update.message.text) {
       const text = update.message.text.trim();
 
@@ -86,8 +120,8 @@ exports.handler = async (event) => {
           fields: { data: { stringValue: `withdraw_${mId}_${wCode}` } }
         });
         await callTelegram('sendMessage', { 
-            chat_id: chatId, 
-            text: "🏦 Одоо татах мөнгөө хүлээн авах ДАНСНЫ МЭДЭЭЛЛЭЭ бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" 
+          chat_id: chatId, 
+          text: "🏦 Одоо татах мөнгөө хүлээн авах ДАНСНЫ МЭДЭЭЛЛЭЭ бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" 
         });
       }
       // ЦЭНЭГЛЭХ ID
@@ -96,44 +130,6 @@ exports.handler = async (event) => {
         let trxCode = "";
         const existing = (searchRes.documents || []).find(d => d.fields.gameId && d.fields.gameId.stringValue === text);
         
-        if (existing) {
-          trxCode = existing.fields.trxCode.stringValue;
-        } else {
-          const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-          for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
-          await callFirestore('POST', '/requests', { fields: { gameId: { stringValue: text }, trxCode: { stringValue: trxCode } } });
-        }
-        
-        await callTelegram('sendMessage', {
-          chat_id: chatId, text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}`,
-          reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]] }
-        });
-      }
-      // ДАНСНЫ МЭДЭЭЛЭЛ (MN... эсвэл 16+ оронтой тоо)
-      else if (text.toUpperCase().includes("MN") || (text.replace(/\D/g, '').length >= 15)) {
-        const stateRes = await callFirestore('GET', `/user_states/${chatId}`);
-        if (stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
-          const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
-          await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Хүсэлт бүртгэгдлээ. Түр хүлээнэ үү." });
-          await callTelegram('sendMessage', {
-            chat_id: ADMIN_ID,
-            text: `⚠️ ТАТАХ ХҮСЭЛТ!\n🆔 ID: ${mId}\n🔑 Код: ${wCode}\n🏦 Данс: ${text}\n👤 User: @${update.message.from.username || 'байхгүй'}`
-          });
-          await callFirestore('DELETE', `/user_states/${chatId}`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error(err);
-  }
-  return { statusCode: 200, body: "OK" };
-};        });
-      }
-      // ЦЭНЭГЛЭХ ID (7-12 оронтой тоо)
-      else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
-        const searchRes = await callFirestore('GET', '/requests');
-        let trxCode = "";
-        const existing = (searchRes.documents || []).find(d => d.fields.gameId && d.fields.gameId.stringValue === text);
         if (existing) { trxCode = existing.fields.trxCode.stringValue; } 
         else {
           const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -145,22 +141,28 @@ exports.handler = async (event) => {
           reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]] }
         });
       }
-      // ДАНСНЫ МЭДЭЭЛЭЛ ТАНИХ (MN... эсвэл 16+ оронтой тоо)
-      else if (text.toUpperCase().includes("MN") || (text.replace(/\D/g, '').length >= 16)) {
+      // ДАНСНЫ МЭДЭЭЛЭЛ (MN... эсвэл 16+ оронтой тоо)
+      else if (text.toUpperCase().includes("MN") || (text.replace(/\D/g, '').length >= 15)) {
         const stateRes = await callFirestore('GET', `/user_states/${chatId}`);
         if (stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
           const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
           await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Хүсэлт бүртгэгдлээ. Түр хүлээнэ үү." });
+          
+          // Админд Татах хүсэлтийг товчлууртай илгээх
           await callTelegram('sendMessage', {
             chat_id: ADMIN_ID,
-            text: `⚠️ ТАТАХ ХҮСЭЛТ!\n🆔 ID: ${mId}\n🔑 Код: ${wCode}\n🏦 Данс: ${text}\n👤 User: @${update.message.from.username || 'байхгүй'}`
+            text: `⚠️ ТАТАХ ХҮСЭЛТ!\n🆔 ID: ${mId}\n🔑 Код: ${wCode}\n🏦 Данс: ${text}\n👤 User: @${update.message.from.username || 'байхгүй'}`,
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "✅ Зөвшөөрөх", callback_data: `adm_ok_wit_${chatId}_${mId}` },
+                { text: "❌ Татгалзах", callback_data: `adm_no_wit_${chatId}_${mId}` }
+              ]]
+            }
           });
           await callFirestore('DELETE', `/user_states/${chatId}`);
         }
       }
     }
-  } catch (err) {
-    console.error(err);
-  }
+  } catch (err) { console.error(err); }
   return { statusCode: 200, body: "OK" };
 };
