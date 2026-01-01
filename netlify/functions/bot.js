@@ -46,19 +46,6 @@ exports.handler = async (event) => {
     const chatId = update.message ? update.message.chat.id : (update.callback_query ? update.callback_query.message.chat.id : null);
     if (!chatId) return { statusCode: 200 };
 
-    // --- SPAM ХАМГААЛАЛТ ---
-    const userRef = `/users/${chatId}`;
-    const userData = await callFirestore('GET', userRef);
-    const now = Date.now();
-    
-    if (userData.fields && userData.fields.lastAction) {
-      const lastAction = parseInt(userData.fields.lastAction.integerValue);
-      if (now - lastAction < 5000) return { statusCode: 200 }; // 5 секундын хязгаар
-    }
-    await callFirestore('PATCH', `${userRef}?updateMask.fieldPaths=lastAction`, {
-      fields: { lastAction: { integerValue: now.toString() } }
-    });
-
     // 1. Товчлуур дарах
     if (update.callback_query) {
       const cb = update.callback_query;
@@ -102,6 +89,45 @@ exports.handler = async (event) => {
             chat_id: chatId, 
             text: "🏦 Одоо татах мөнгөө хүлээн авах ДАНСНЫ МЭДЭЭЛЛЭЭ бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" 
         });
+      }
+      // ЦЭНЭГЛЭХ ID
+      else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
+        const searchRes = await callFirestore('GET', '/requests');
+        let trxCode = "";
+        const existing = (searchRes.documents || []).find(d => d.fields.gameId && d.fields.gameId.stringValue === text);
+        
+        if (existing) {
+          trxCode = existing.fields.trxCode.stringValue;
+        } else {
+          const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+          for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
+          await callFirestore('POST', '/requests', { fields: { gameId: { stringValue: text }, trxCode: { stringValue: trxCode } } });
+        }
+        
+        await callTelegram('sendMessage', {
+          chat_id: chatId, text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}`,
+          reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]] }
+        });
+      }
+      // ДАНСНЫ МЭДЭЭЛЭЛ (MN... эсвэл 16+ оронтой тоо)
+      else if (text.toUpperCase().includes("MN") || (text.replace(/\D/g, '').length >= 15)) {
+        const stateRes = await callFirestore('GET', `/user_states/${chatId}`);
+        if (stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
+          const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
+          await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Хүсэлт бүртгэгдлээ. Түр хүлээнэ үү." });
+          await callTelegram('sendMessage', {
+            chat_id: ADMIN_ID,
+            text: `⚠️ ТАТАХ ХҮСЭЛТ!\n🆔 ID: ${mId}\n🔑 Код: ${wCode}\n🏦 Данс: ${text}\n👤 User: @${update.message.from.username || 'байхгүй'}`
+          });
+          await callFirestore('DELETE', `/user_states/${chatId}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+  return { statusCode: 200, body: "OK" };
+};        });
       }
       // ЦЭНЭГЛЭХ ID (7-12 оронтой тоо)
       else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
