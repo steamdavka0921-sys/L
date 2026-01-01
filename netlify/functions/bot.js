@@ -50,58 +50,84 @@ exports.handler = async (event) => {
       const cb = update.callback_query;
       const data = cb.data;
 
-      if (data === "menu_deposit") {
-        await callTelegram('sendMessage', { chat_id: chatId, text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" });
-      } 
-      else if (data === "menu_withdraw") {
-        await callTelegram('sendMessage', { chat_id: chatId, text: "💳 Татах хүсэлт:\n\nТа MELBET ID болон Таталтын кодоо хамт бичнэ үү.\nЖишээ нь: 984210857 XUFD" });
-      }
-      else if (data.startsWith("paid_")) {
+      // --- ЦЭНЭГЛЭХ ТӨЛБӨР ТӨЛСӨН ХЭСЭГ ---
+      if (data.startsWith("paid_")) {
         const [_, gId, tCode] = data.split("_");
-        
-        // --- ӨӨРЧЛӨЛТ: Текст солих ---
+        const requestId = `${chatId}_${Date.now()}`; // Дахин давтагдашгүй ID
+
+        // 1. Firestore-д хүсэлтийг "pending" төлөвтэй хадгалах
+        await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status&updateMask.fieldPaths=chatId`, {
+          fields: { 
+            status: { stringValue: "pending" },
+            chatId: { stringValue: String(chatId) }
+          }
+        });
+
         await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгажбайна. Түр хүлээнэ үү." });
-        
-        const adminMsg = await callTelegram('sendMessage', { 
+
+        await callTelegram('sendMessage', { 
           chat_id: ADMIN_ID, 
           text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${gId}\n📌 Код: ${tCode}\n👤 User: @${cb.from.username || 'unknown'}`,
           reply_markup: {
             inline_keyboard: [[
-              { text: "✅ Зөвшөөрөх", callback_data: `adm_ok_dep_${chatId}_${gId}` },
-              { text: "❌ Татгалзах", callback_data: `adm_no_dep_${chatId}_${gId}` }
+              { text: "✅ Зөвшөөрөх", callback_data: `adm_ok_dep_${chatId}_${gId}_${requestId}` },
+              { text: "❌ Татгалзах", callback_data: `adm_no_dep_${chatId}_${gId}_${requestId}` }
             ]]
           }
         });
 
-        // --- ЛОГИК: 2 минутын таймер ---
-        // Хэрэв таны Cloud Function/Lambda хугацаа нь хүрэлцээтэй бол (жишээ нь 150 сек) ажиллана.
-        setTimeout(async () => {
-           // Админ шийдвэр гаргаагүй эсэхийг Firestore-оос эсвэл Message-ээс шалгах боломжтой
-           // Гэхдээ хамгийн хялбар нь шууд татгалзсан хариу явуулах (хэрэв админ зөвшөөрөөгүй бол)
-           await callTelegram('sendMessage', { 
-             chat_id: chatId, 
-             text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" 
-           });
-        }, 120000); // 120,000 ms = 2 минут
+        // --- ЭНД ЧУХАЛ: 2 минутын дараа шалгах ---
+        // Хэрэв таны систем AWS Lambda бол "Wait" эсвэл "Step Functions" ашиглах нь зөв. 
+        // Гэхдээ хамгийн хялбар арга нь 2 минутын дотор хариу өгөх "Promise Delay" юм.
+        const delay = (ms) => new Promise(res => setTimeout(res, ms));
+        
+        // Функц дуусахаас өмнө 2 минут хүлээнэ
+        await delay(120000); 
 
+        // 2 минутын дараа Firestore-оос төлөвийг шалгах
+        const check = await callFirestore('GET', `/active_requests/${requestId}`);
+        if (check.fields && check.fields.status.stringValue === "pending") {
+            // Хэрэв төлөв өөрчлөгдөөгүй (админ дараагүй) бол татгалзсан хариу явуулна
+            await callTelegram('sendMessage', { 
+                chat_id: chatId, 
+                text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" 
+            });
+            // Дахин мессеж явуулахгүй тулд төлөвийг нь expired болгох
+            await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, {
+                fields: { status: { stringValue: "expired" } }
+            });
+        }
       }
-      else if (data.startsWith("adm_")) {
-        const [_, status, type, userId, targetId] = data.split("_");
-        const finalStatus = (status === "ok") ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
-        const typeName = (type === "dep") ? "Цэнэглэлт" : "Таталт";
 
-        await callTelegram('sendMessage', { chat_id: userId, text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай ${typeName} хүсэлтийг админ ${finalStatus} болголоо.` });
+      // --- АДМИН ДАРАХ ХЭСЭГ ---
+      else if (data.startsWith("adm_")) {
+        const [_, status, type, userId, targetId, requestId] = data.split("_");
+        
+        // Firestore-оос шалгах: Хэрэв аль хэдийн 2 минут өнгөрөөд "expired" болсон бол юу ч хийхгүй
+        const check = await callFirestore('GET', `/active_requests/${requestId}`);
+        if (check.fields && check.fields.status.stringValue === "expired") {
+            await callTelegram('answerCallbackQuery', { callback_query_id: cb.id, text: "⚠️ 2 минут өнгөрсөн тул систем татгалзсан хариу илгээсэн байна!", show_alert: true });
+            return { statusCode: 200 };
+        }
+
+        // Хэрэв амжсан бол төлөвийг нь "completed" болгоод хэрэглэгчид хариу явуулна
+        await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, {
+          fields: { status: { stringValue: "completed" } }
+        });
+
+        const finalStatus = (status === "ok") ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
+        await callTelegram('sendMessage', { chat_id: userId, text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай хүсэлтийг админ ${finalStatus} болголоо.` });
+        
         await callTelegram('editMessageText', {
           chat_id: ADMIN_ID, message_id: cb.message.message_id,
-          text: `🏁 ШИЙДВЕРЛЭГДЭВ:\nТөрөл: ${typeName}\nID: ${targetId}\nТөлөв: ${finalStatus}`
+          text: `🏁 ШИЙДВЕРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}`
         });
       }
       await callTelegram('answerCallbackQuery', { callback_query_id: cb.id });
-      return { statusCode: 200 };
     }
-
-    // Текст мессеж болон бусад логикууд хэвээрээ...
-    if (update.message && update.message.text) {
+  } catch (err) { console.error(err); }
+  return { statusCode: 200, body: "OK" };
+};    if (update.message && update.message.text) {
       const text = update.message.text.trim();
 
       if (text === "/start") {
