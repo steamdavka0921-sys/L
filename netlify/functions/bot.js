@@ -97,7 +97,7 @@ exports.handler = async (event) => {
       if (text === "/start") {
         await callTelegram('sendMessage', {
           chat_id: chatId,
-          text: "Сайн байна уу? Deposit бот-д тавтай морилно уу. Үйлчилгээгээ сонгоно уу:",
+          text: "Сайн байна уу? EEGII AUTOMAT 24/7 Deposit, WITHDRAW бот-д тавтай морилно уу. Үйлчилгээгээ сонгоно уу:",
           reply_markup: {
             inline_keyboard: [
               [{ text: "💰 Цэнэглэх", callback_data: "menu_deposit" }, { text: "💳 Татах", callback_data: "menu_withdraw" }]
