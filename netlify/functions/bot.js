@@ -65,7 +65,7 @@ exports.handler = async (event) => {
         await callFirestore('PATCH', `/user_states/${chatId}?updateMask.fieldPaths=data`, {
           fields: { data: { stringValue: `withdraw_${mId}_${wCode}` } }
         });
-        return await callTelegram('sendMessage', { chat_id: chatId, text: "🏦 Одоо татах кодоо болон хүлээн авах ДАНС-аа бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" });
+        return await callTelegram('sendMessage', { chat_id: chatId, text: "🏦 Одоо татах мөнгөө хүлээн авах ДАНС-аа бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" });
       }
 
       // Цэнэглэх ID шалгах
@@ -153,7 +153,7 @@ exports.handler = async (event) => {
           await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, { fields: { status: { stringValue: "completed" } } });
           const finalStatus = (status === "ok") ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
           
-          await callTelegram('sendMessage', { chat_id: userId, text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай хүсэлт ${finalStatus} .` });
+          await callTelegram('sendMessage', { chat_id: userId, text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай хүсэлтийг админ ${finalStatus} болголоо.` });
           await callTelegram('editMessageText', {
             chat_id: ADMIN_ID, message_id: cb.message.message_id,
             text: `🏁 ШИЙДВЕРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}`
