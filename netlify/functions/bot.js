@@ -1,3 +1,4 @@
+
 const https = require('https');
 
 exports.handler = async (event) => {
@@ -47,7 +48,7 @@ exports.handler = async (event) => {
     const chatId = update.message ? update.message.chat.id : (update.callback_query ? update.callback_query.message.chat.id : null);
     if (!chatId) return { statusCode: 200 };
 
-    // --- ТОВЧЛУУР ДАРАХ ХЭСЭГ ---
+    // --- 1. ТОВЧЛУУР ДАРАХ ХЭСЭГ (Callback Queries) ---
     if (update.callback_query) {
       const cb = update.callback_query;
       const data = cb.data;
@@ -56,14 +57,11 @@ exports.handler = async (event) => {
         await callTelegram('sendMessage', { chat_id: chatId, text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" });
       } 
       else if (data === "menu_withdraw") {
-        // 1. ЗААВАР ЗУРАГ + ТЕКСТ (Post 1)
         await callTelegram('sendPhoto', {
           chat_id: chatId,
           photo: WITHDRAW_PHOTO,
           caption: "🎯 Та мөнгөө татах үедээ:\n📲 My account-руугаа ороод Withdraw цэснээс MELBET CASH сонголтыг сонгох ба мөнгөн дүнгээ оруулаад:\n\n🎯 CITY ХЭСЭГТ: Darkhan\n🎯 STREET ХЭСЭГТ: EEGII AGENT (24/7)"
         });
-
-        // 2. ЗААВАР ТЕКСТ (Post 2)
         await callTelegram('sendMessage', { 
           chat_id: chatId, 
           text: "💳 Татах хүсэлт:\n\nТа MELBET ID болон Таталтын кодоо хамт бичнэ үү.\nЖишээ нь: 984210857 XUFD" 
@@ -126,29 +124,49 @@ exports.handler = async (event) => {
       return { statusCode: 200 };
     }
 
-    // --- МЕССЕЖ ХҮЛЭЭН АВАХ ХЭСЭГ ---
+    // --- 2. МЕССЕЖ ХҮЛЭЭН АВАХ ХЭСЭГ (Messages) ---
     if (update.message && update.message.text) {
       const text = update.message.text.trim();
+
       if (text === "/start") {
         await callTelegram('sendMessage', {
           chat_id: chatId, text: "Сайн байна уу? EEGII AUTOMAT 24/7\n\nДанс солигдох тул заавал шалгаж шилжүүлээрэй!",
           reply_markup: { inline_keyboard: [[{ text: "💰 Цэнэглэх", callback_data: "menu_deposit" }, { text: "💳 Татах", callback_data: "menu_withdraw" }]] }
         });
       } 
+      // ЦЭНЭГЛЭХ ID БҮРТГЭХ (1 ID = 1 FIXED CODE)
+      else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
+        const gameId = text.replace(/\s/g, '');
+        const existingReq = await callFirestore('GET', `/requests/${gameId}`);
+        let trxCode = "";
+
+        if (existingReq.fields && existingReq.fields.trxCode) {
+          trxCode = existingReq.fields.trxCode.stringValue;
+        } else {
+          const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+          for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
+          
+          await callFirestore('PATCH', `/requests/${gameId}?updateMask.fieldPaths=trxCode&updateMask.fieldPaths=gameId`, {
+            fields: { 
+              trxCode: { stringValue: trxCode },
+              gameId: { stringValue: gameId }
+            }
+          });
+        }
+        
+        await callTelegram('sendMessage', {
+          chat_id: chatId, 
+          text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}\n\n⚠️ ТАНЫ ID-Д ОНООГДСОН ТОГТМОЛ УТГА ТУЛ ЗӨВХӨН ҮҮНИЙГ БИЧНЭ ҮҮ!`,
+          reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${gameId}_${trxCode}` }]] }
+        });
+      }
+      // ТАТАХ ХҮСЭЛТИЙН ЭХНИЙ ШАТ (ID + CODE)
       else if (text.includes(" ") && text.split(" ")[0].length >= 7) {
         const [mId, wCode] = text.split(" ");
         await callFirestore('PATCH', `/user_states/${chatId}?updateMask.fieldPaths=data`, { fields: { data: { stringValue: `withdraw_${mId}_${wCode}` } } });
         await callTelegram('sendMessage', { chat_id: chatId, text: "🏦 Одоо татах мөнгөө хүлээн авах ДАНС-аа бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" });
       }
-      else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
-        const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-        let trxCode = ""; for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
-        await callFirestore('POST', '/requests', { fields: { gameId: { stringValue: text }, trxCode: { stringValue: trxCode } } });
-        await callTelegram('sendMessage', {
-          chat_id: chatId, text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}`,
-          reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${text}_${trxCode}` }]] }
-        });
-      }
+      // ТАТАХ ДАНС ХҮЛЭЭЖ АВАХ
       else if (text.toUpperCase().includes("MN") || (text.replace(/\D/g, '').length >= 15)) {
         const stateRes = await callFirestore('GET', `/user_states/${chatId}`);
         if (stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
