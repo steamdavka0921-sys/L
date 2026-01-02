@@ -44,7 +44,7 @@ exports.handler = async (event) => {
   try {
     const update = JSON.parse(event.body);
     
-    // --- 1. ТЕКСТ МЕССЕЖ ШАЛГАХ (/start энд байна) ---
+    // --- 1. ТЕКСТ МЕССЕЖ ШАЛГАХ ---
     if (update.message && update.message.text) {
       const chatId = update.message.chat.id;
       const text = update.message.text.trim();
@@ -59,13 +59,13 @@ exports.handler = async (event) => {
         });
       } 
       
-      // Татах логик
+      // Татах логик (ID болон Код хүлээн авах)
       if (text.includes(" ") && text.split(" ")[0].length >= 7) {
         const [mId, wCode] = text.split(" ");
         await callFirestore('PATCH', `/user_states/${chatId}?updateMask.fieldPaths=data`, {
           fields: { data: { stringValue: `withdraw_${mId}_${wCode}` } }
         });
-        return await callTelegram('sendMessage', { chat_id: chatId, text: "🏦 Одоо татах мөнгөө хүлээн авах ДАНС-аа бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" });
+        return await callTelegram('sendMessage', { chat_id: chatId, text: "🏦 Одоо татах кодоо болон хүлээн авах ДАНС-аа бичнэ үү:\n\n⚠️ ЗААВАЛ IBAN (MN...) тай цуг бичнэ шүү!" });
       }
 
       // Цэнэглэх ID шалгах
@@ -88,12 +88,12 @@ exports.handler = async (event) => {
         });
       }
 
-      // Данс хүлээн авах
+      // Татах данс хүлээн авах
       if (text.toUpperCase().includes("MN") || (text.replace(/\D/g, '').length >= 15)) {
         const stateRes = await callFirestore('GET', `/user_states/${chatId}`);
         if (stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
           const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
-          await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгажбайна. Түр хүлээнэ үү." });
+          await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгаж байна. Түр хүлээнэ үү." });
           
           const requestId = `wit_${chatId}_${Date.now()}`;
           await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, { fields: { status: { stringValue: "pending" } } });
@@ -108,15 +108,6 @@ exports.handler = async (event) => {
               ]]
             }
           });
-
-          // 2 минутын таймер
-          setTimeout(async () => {
-            const check = await callFirestore('GET', `/active_requests/${requestId}`);
-            if (check.fields && check.fields.status.stringValue === "pending") {
-              await callTelegram('sendMessage', { chat_id: chatId, text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" });
-              await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, { fields: { status: { stringValue: "expired" } } });
-            }
-          }, 120000);
 
           await callFirestore('DELETE', `/user_states/${chatId}`);
           return { statusCode: 200 };
@@ -141,7 +132,7 @@ exports.handler = async (event) => {
         const requestId = `dep_${chatId}_${Date.now()}`;
         
         await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, { fields: { status: { stringValue: "pending" } } });
-        await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгажбайна. Түр хүлээнэ үү." });
+        await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгаж байна. Түр хүлээнэ үү." });
 
         await callTelegram('sendMessage', { 
           chat_id: ADMIN_ID, 
@@ -153,14 +144,6 @@ exports.handler = async (event) => {
             ]]
           }
         });
-
-        setTimeout(async () => {
-          const check = await callFirestore('GET', `/active_requests/${requestId}`);
-          if (check.fields && check.fields.status.stringValue === "pending") {
-            await callTelegram('sendMessage', { chat_id: chatId, text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" });
-            await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, { fields: { status: { stringValue: "expired" } } });
-          }
-        }, 120000);
       }
       else if (data.startsWith("adm_")) {
         const [_, status, type, userId, targetId, requestId] = data.split("_");
@@ -169,13 +152,14 @@ exports.handler = async (event) => {
         if (check.fields && check.fields.status.stringValue === "pending") {
           await callFirestore('PATCH', `/active_requests/${requestId}?updateMask.fieldPaths=status`, { fields: { status: { stringValue: "completed" } } });
           const finalStatus = (status === "ok") ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
-          await callTelegram('sendMessage', { chat_id: userId, text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай хүсэлтийг админ ${finalStatus} болголоо.` });
+          
+          await callTelegram('sendMessage', { chat_id: userId, text: `📣 МЭДЭГДЭЛ:\nТаны ${targetId} ID-тай хүсэлт ${finalStatus} .` });
           await callTelegram('editMessageText', {
             chat_id: ADMIN_ID, message_id: cb.message.message_id,
             text: `🏁 ШИЙДВЕРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}`
           });
         } else {
-          await callTelegram('answerCallbackQuery', { callback_query_id: cb.id, text: "⚠️ Хугацаа дууссан эсвэл шийдэгдсэн байна!", show_alert: true });
+          await callTelegram('answerCallbackQuery', { callback_query_id: cb.id, text: "⚠️ Энэ хүсэлт аль хэдийн шийдэгдсэн байна!", show_alert: true });
         }
       }
       await callTelegram('answerCallbackQuery', { callback_query_id: cb.id });
