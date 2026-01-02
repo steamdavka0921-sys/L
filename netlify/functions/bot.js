@@ -1,4 +1,3 @@
-
 const https = require('https');
 
 exports.handler = async (event) => {
@@ -7,6 +6,7 @@ exports.handler = async (event) => {
   const TOKEN = process.env.BOT_TOKEN;
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
   const FIREBASE_ID = process.env.FIREBASE_PROJECT_ID;
+  const API_KEY = process.env.FIREBASE_API_KEY; 
   const WITHDRAW_PHOTO = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767338251/fljqkzsqe4rtkhijsdsq.jpg";
 
   const callTelegram = async (method, params) => {
@@ -29,14 +29,20 @@ exports.handler = async (event) => {
   const callFirestore = async (method, path, body = null) => {
     const data = body ? JSON.stringify(body) : null;
     const options = {
-      hostname: 'firestore.googleapis.com', port: 443, path: `/v1/projects/${FIREBASE_ID}/databases/(default)/documents${path}`,
-      method: method, headers: data ? { 'Content-Type': 'application/json' } : {}
+      hostname: 'firestore.googleapis.com',
+      port: 443,
+      // API KEY-г URL дээр заавал дамжуулна
+      path: `/v1/projects/${FIREBASE_ID}/databases/(default)/documents${path}?key=${API_KEY}`,
+      method: method,
+      headers: data ? { 'Content-Type': 'application/json' } : {}
     };
     return new Promise((resolve) => {
       const req = https.request(options, (res) => {
         let resBody = '';
         res.on('data', (d) => resBody += d);
-        res.on('end', () => resolve(JSON.parse(resBody || '{}')));
+        res.on('end', () => {
+          try { resolve(JSON.parse(resBody)); } catch (e) { resolve({}); }
+        });
       });
       if (data) req.write(data);
       req.end();
@@ -107,15 +113,15 @@ exports.handler = async (event) => {
           reply_markup: { inline_keyboard: [[{ text: "💰 Цэнэглэх", callback_data: "menu_deposit" }, { text: "💳 Татах", callback_data: "menu_withdraw" }]] }
         });
       } 
-      // 🎯 ID ШАЛГАХ ХЭСЭГ (ЗАСВАР ОРСОН)
+      // --- 🎯 ГҮЙЛГЭЭНИЙ УТГА ШАЛГАХ ---
       else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
         const gameId = text.replace(/\s/g, '');
-        const existingReq = await callFirestore('GET', `/requests/${gameId}`);
+        const existingData = await callFirestore('GET', `/requests/${gameId}`);
         let trxCode = "";
 
-        // Firebase-аас ирсэн хариунд 'fields' байгаа эсэхийг маш тодорхой шалгана
-        if (existingReq && existingReq.fields && existingReq.fields.trxCode) {
-          trxCode = existingReq.fields.trxCode.stringValue;
+        // Firestore-оос хариу зөв ирж байгаа эсэхийг шалгана
+        if (existingData && existingData.fields && existingData.fields.trxCode) {
+          trxCode = existingData.fields.trxCode.stringValue;
         } else {
           const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
           for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -131,6 +137,7 @@ exports.handler = async (event) => {
           reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${gameId}_${trxCode}` }]] }
         });
       }
+      // --- ТАТАХ ХҮСЭЛТ ---
       else if (text.includes(" ") && text.split(" ")[0].length >= 7) {
         const [mId, wCode] = text.split(" ");
         await callFirestore('PATCH', `/user_states/${chatId}?updateMask.fieldPaths=data`, { fields: { data: { stringValue: `withdraw_${mId}_${wCode}` } } });
