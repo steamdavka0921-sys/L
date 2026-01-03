@@ -71,17 +71,21 @@ exports.handler = async (event) => {
       }
       else if (data.startsWith("paid_")) {
         const [_, gId, tCode] = data.split("_");
-        // 1. ЦЭНЭГЛЭХ ХЭСЭГ: Текст болон GIF оруулав
-        await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгаж байна. Түр хүлээнэ үү." });
-        await callTelegram('sendAnimation', { chat_id: chatId, animation: LOADING_GIF });
         
+        // --- ШИНЭЧЛЭЛ: Текст болон GIF хамт илгээх ---
+        await callTelegram('sendAnimation', { 
+          chat_id: chatId, 
+          animation: LOADING_GIF, 
+          caption: "✅ Шалгаж байна. Түр хүлээнэ үү." 
+        });
+
         const nowTs = Date.now();
         await callFirestore('PATCH', `/requests/${gId}?updateMask.fieldPaths=createdAt`, {
           fields: { createdAt: { stringValue: nowTs.toString() } }
         });
         await callTelegram('sendMessage', { 
           chat_id: ADMIN_ID, 
-          text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${gId}\n📌 Код: ${tCode}\n👤 User: @${cb.from.username || 'unknown'}`,
+          text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${gId}\n📍 Код: ${tCode}\n👤 User: @${cb.from.username || 'unknown'}`,
           reply_markup: { inline_keyboard: [[{ text: "✅ Зөвшөөрөх", callback_data: `adm_ok_dep_${chatId}_${gId}` }, { text: "❌ Татгалзах", callback_data: `adm_no_dep_${chatId}_${gId}` }]] }
         });
       }
@@ -96,11 +100,11 @@ exports.handler = async (event) => {
           if (diffSec > 120) isExpired = true; 
         }
         if (isApprove && isExpired) {
-          await callTelegram('sendMessage', { chat_id: userId, text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй таньд тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" });
+          await callTelegram('sendMessage', { chat_id: userId, text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй танд тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" });
           await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `⚠️ ХУГАЦАА ХЭТЭРСЭН (2мин+):\nID: ${targetId}\nТөлөв: Цуцлагдсан` });
         } else {
           const finalStatus = isApprove ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
-          const userMsg = isApprove ? `Таны ${targetId} ID-тай хүсэлтийг админ зөвшөөрлөө.` : "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой";
+          const userMsg = isApprove ? `Таны ${targetId} ID-тай хүсэлтийг админ зөвшөөрлөө.` : "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй танд тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой";
           await callTelegram('sendMessage', { chat_id: userId, text: userMsg });
           await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `🏁 ШИЙДВЭРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}` });
         }
@@ -121,15 +125,18 @@ exports.handler = async (event) => {
         const gameId = text.replace(/\s/g, '');
         const existingData = await callFirestore('GET', `/requests/${gameId}`);
         let trxCode = "";
+
         if (existingData && existingData.fields && existingData.fields.trxCode) {
           trxCode = existingData.fields.trxCode.stringValue;
         } else {
           const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
           for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
+          
           await callFirestore('PATCH', `/requests/${gameId}?updateMask.fieldPaths=trxCode&updateMask.fieldPaths=gameId`, {
             fields: { trxCode: { stringValue: trxCode }, gameId: { stringValue: gameId } }
           });
         }
+        
         await callTelegram('sendMessage', {
           chat_id: chatId, 
           text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}\n\n⚠️ ТАНЫ ID-Д ОНООГДСОН ТОГТМОЛ УТГА ТУЛ ЗӨВХӨН ҮҮНИЙГ БИЧНЭ ҮҮ!`,
@@ -146,10 +153,13 @@ exports.handler = async (event) => {
         if (stateRes && stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
           const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
           
-          // 2. ТАТАХ ХЭСЭГ: Текст болон GIF оруулав
-          await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгажбайна. Түр хүлээнэ үү." });
-          await callTelegram('sendAnimation', { chat_id: chatId, animation: LOADING_GIF });
-          
+          // --- ШИНЭЧЛЭЛ: Татах хүсэлт дээр Текст болон GIF хамт илгээх ---
+          await callTelegram('sendAnimation', { 
+            chat_id: chatId, 
+            animation: LOADING_GIF, 
+            caption: "✅ Шалгаж байна. Түр хүлээнэ үү." 
+          });
+
           await callTelegram('sendMessage', {
             chat_id: ADMIN_ID, text: `⚠️ ТАТАХ ХҮСЭЛТ!\n🆔 ID: ${mId}\n🔑 Код: ${wCode}\n🏦 Данс: ${text}`,
             reply_markup: { inline_keyboard: [[{ text: "✅ Зөвшөөрөх", callback_data: `adm_ok_wit_${chatId}_${mId}` }, { text: "❌ Татгалзах", callback_data: `adm_no_wit_${chatId}_${mId}` }]] }
