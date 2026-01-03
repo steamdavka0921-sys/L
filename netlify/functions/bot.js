@@ -7,7 +7,9 @@ exports.handler = async (event) => {
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
   const FIREBASE_ID = process.env.FIREBASE_PROJECT_ID;
   const API_KEY = process.env.FIREBASE_API_KEY; 
+  
   const WITHDRAW_PHOTO = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767338251/fljqkzsqe4rtkhijsdsq.jpg";
+  const DEPOSIT_GIF = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767404699/zzxmv9nclwgk5jw259na.gif";
 
   const callTelegram = async (method, params) => {
     const data = JSON.stringify(params);
@@ -29,20 +31,15 @@ exports.handler = async (event) => {
   const callFirestore = async (method, path, body = null) => {
     const data = body ? JSON.stringify(body) : null;
     const options = {
-      hostname: 'firestore.googleapis.com',
-      port: 443,
-      // API KEY-г URL дээр заавал дамжуулна
+      hostname: 'firestore.googleapis.com', port: 443,
       path: `/v1/projects/${FIREBASE_ID}/databases/(default)/documents${path}?key=${API_KEY}`,
-      method: method,
-      headers: data ? { 'Content-Type': 'application/json' } : {}
+      method: method, headers: data ? { 'Content-Type': 'application/json' } : {}
     };
     return new Promise((resolve) => {
       const req = https.request(options, (res) => {
         let resBody = '';
         res.on('data', (d) => resBody += d);
-        res.on('end', () => {
-          try { resolve(JSON.parse(resBody)); } catch (e) { resolve({}); }
-        });
+        res.on('end', () => { try { resolve(JSON.parse(resBody)); } catch (e) { resolve({}); } });
       });
       if (data) req.write(data);
       req.end();
@@ -58,8 +55,17 @@ exports.handler = async (event) => {
       const cb = update.callback_query;
       const data = cb.data;
 
+      // --- ЦЭНЭГЛЭХ ТОВЧЛУУР (GIF + TEXT) ---
       if (data === "menu_deposit") {
-        await callTelegram('sendMessage', { chat_id: chatId, text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" });
+        await callTelegram('sendAnimation', {
+          chat_id: chatId,
+          animation: DEPOSIT_GIF,
+          caption: "🎯 Та дансаа цэнэглэх үедээ:\n\n1. Доорх данс руу мөнгөө шилжүүлнэ.\n2. Гүйлгээний утга дээр өөрийн ID-д оноогдсон утгыг бичнэ."
+        });
+        await callTelegram('sendMessage', { 
+          chat_id: chatId, 
+          text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" 
+        });
       } 
       else if (data === "menu_withdraw") {
         await callTelegram('sendPhoto', {
@@ -113,19 +119,16 @@ exports.handler = async (event) => {
           reply_markup: { inline_keyboard: [[{ text: "💰 Цэнэглэх", callback_data: "menu_deposit" }, { text: "💳 Татах", callback_data: "menu_withdraw" }]] }
         });
       } 
-      // --- 🎯 ГҮЙЛГЭЭНИЙ УТГА ШАЛГАХ ---
       else if (!isNaN(text.replace(/\s/g, '')) && text.length >= 7 && text.length < 15) {
         const gameId = text.replace(/\s/g, '');
         const existingData = await callFirestore('GET', `/requests/${gameId}`);
         let trxCode = "";
 
-        // Firestore-оос хариу зөв ирж байгаа эсэхийг шалгана
         if (existingData && existingData.fields && existingData.fields.trxCode) {
           trxCode = existingData.fields.trxCode.stringValue;
         } else {
           const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
           for (let i = 0; i < 5; i++) trxCode += chars.charAt(Math.floor(Math.random() * chars.length));
-          
           await callFirestore('PATCH', `/requests/${gameId}?updateMask.fieldPaths=trxCode&updateMask.fieldPaths=gameId`, {
             fields: { trxCode: { stringValue: trxCode }, gameId: { stringValue: gameId } }
           });
@@ -137,7 +140,6 @@ exports.handler = async (event) => {
           reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${gameId}_${trxCode}` }]] }
         });
       }
-      // --- ТАТАХ ХҮСЭЛТ ---
       else if (text.includes(" ") && text.split(" ")[0].length >= 7) {
         const [mId, wCode] = text.split(" ");
         await callFirestore('PATCH', `/user_states/${chatId}?updateMask.fieldPaths=data`, { fields: { data: { stringValue: `withdraw_${mId}_${wCode}` } } });
