@@ -7,9 +7,9 @@ exports.handler = async (event) => {
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
   const FIREBASE_ID = process.env.FIREBASE_PROJECT_ID;
   const API_KEY = process.env.FIREBASE_API_KEY; 
-  
   const WITHDRAW_PHOTO = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767338251/fljqkzsqe4rtkhijsdsq.jpg";
-  const DEPOSIT_GIF = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767404699/zzxmv9nclwgk5jw259na.gif";
+  // Таны өгсөн GIF линк
+  const LOADING_GIF = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767404699/zzxmv9nclwgk5jw259na.gif";
 
   const callTelegram = async (method, params) => {
     const data = JSON.stringify(params);
@@ -31,15 +31,19 @@ exports.handler = async (event) => {
   const callFirestore = async (method, path, body = null) => {
     const data = body ? JSON.stringify(body) : null;
     const options = {
-      hostname: 'firestore.googleapis.com', port: 443,
+      hostname: 'firestore.googleapis.com',
+      port: 443,
       path: `/v1/projects/${FIREBASE_ID}/databases/(default)/documents${path}?key=${API_KEY}`,
-      method: method, headers: data ? { 'Content-Type': 'application/json' } : {}
+      method: method,
+      headers: data ? { 'Content-Type': 'application/json' } : {}
     };
     return new Promise((resolve) => {
       const req = https.request(options, (res) => {
         let resBody = '';
         res.on('data', (d) => resBody += d);
-        res.on('end', () => { try { resolve(JSON.parse(resBody)); } catch (e) { resolve({}); } });
+        res.on('end', () => {
+          try { resolve(JSON.parse(resBody)); } catch (e) { resolve({}); }
+        });
       });
       if (data) req.write(data);
       req.end();
@@ -55,28 +59,22 @@ exports.handler = async (event) => {
       const cb = update.callback_query;
       const data = cb.data;
 
-      // --- ЦЭНЭГЛЭХ ТОВЧЛУУР (GIF + TEXT) ---
       if (data === "menu_deposit") {
-        await callTelegram('sendAnimation', {
-          chat_id: chatId,
-          animation: DEPOSIT_GIF,
-          caption: "🎯 Та дансаа цэнэглэх үедээ:\n\n1. Доорх данс руу мөнгөө шилжүүлнэ.\n2. Гүйлгээний утга дээр өөрийн ID-д оноогдсон утгыг бичнэ."
-        });
-        await callTelegram('sendMessage', { 
-          chat_id: chatId, 
-          text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" 
-        });
+        await callTelegram('sendMessage', { chat_id: chatId, text: "💰 Та MELBET ID-гаа бичиж илгээнэ үү:" });
       } 
       else if (data === "menu_withdraw") {
         await callTelegram('sendPhoto', {
           chat_id: chatId, photo: WITHDRAW_PHOTO,
-          caption: "🎯 Та мөнгөө татах үедээ:\n📲 My account-руугаа ороод Withdraw цэснээс MELBET CASH сонголтыг сонгох ба мөнгөн дүнгээ оруулаад:\n\n🎯 CITY ХЭСЭГТ: Darkhan\n🎯 STREET ХЭСЭГТ: EEGII AGENT (24/7)"
+          caption: "🎯 Та мөнгөө татах үедээ:\n📱 My account-руугаа ороод Withdraw цэснээс MELBET CASH сонголтыг сонгох ба мөнгөн дүнгээ оруулаад:\n\n🎯 CITY ХЭСЭГТ: Darkhan\n🎯 STREET ХЭСЭГТ: EEGII AGENT (24/7)"
         });
         await callTelegram('sendMessage', { chat_id: chatId, text: "💳 Татах хүсэлт:\n\nТа MELBET ID болон Таталтын кодоо хамт бичнэ үү.\nЖишээ нь: 984210857 XUFD" });
       }
       else if (data.startsWith("paid_")) {
         const [_, gId, tCode] = data.split("_");
-        await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгажбайна. Түр хүлээнэ үү." });
+        // 1. ЦЭНЭГЛЭХ ХЭСЭГ: Текст болон GIF оруулав
+        await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгаж байна. Түр хүлээнэ үү." });
+        await callTelegram('sendAnimation', { chat_id: chatId, animation: LOADING_GIF });
+        
         const nowTs = Date.now();
         await callFirestore('PATCH', `/requests/${gId}?updateMask.fieldPaths=createdAt`, {
           fields: { createdAt: { stringValue: nowTs.toString() } }
@@ -98,13 +96,13 @@ exports.handler = async (event) => {
           if (diffSec > 120) isExpired = true; 
         }
         if (isApprove && isExpired) {
-          await callTelegram('sendMessage', { chat_id: userId, text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" });
+          await callTelegram('sendMessage', { chat_id: userId, text: "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй таньд тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой" });
           await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `⚠️ ХУГАЦАА ХЭТЭРСЭН (2мин+):\nID: ${targetId}\nТөлөв: Цуцлагдсан` });
         } else {
           const finalStatus = isApprove ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
           const userMsg = isApprove ? `Таны ${targetId} ID-тай хүсэлтийг админ зөвшөөрлөө.` : "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй тань тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой";
           await callTelegram('sendMessage', { chat_id: userId, text: userMsg });
-          await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `🏁 ШИЙДВЕРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}` });
+          await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `🏁 ШИЙДВЭРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}` });
         }
       }
       await callTelegram('answerCallbackQuery', { callback_query_id: cb.id });
@@ -123,7 +121,6 @@ exports.handler = async (event) => {
         const gameId = text.replace(/\s/g, '');
         const existingData = await callFirestore('GET', `/requests/${gameId}`);
         let trxCode = "";
-
         if (existingData && existingData.fields && existingData.fields.trxCode) {
           trxCode = existingData.fields.trxCode.stringValue;
         } else {
@@ -133,7 +130,6 @@ exports.handler = async (event) => {
             fields: { trxCode: { stringValue: trxCode }, gameId: { stringValue: gameId } }
           });
         }
-        
         await callTelegram('sendMessage', {
           chat_id: chatId, 
           text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}\n\n⚠️ ТАНЫ ID-Д ОНООГДСОН ТОГТМОЛ УТГА ТУЛ ЗӨВХӨН ҮҮНИЙГ БИЧНЭ ҮҮ!`,
@@ -149,7 +145,11 @@ exports.handler = async (event) => {
         const stateRes = await callFirestore('GET', `/user_states/${chatId}`);
         if (stateRes && stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
           const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
+          
+          // 2. ТАТАХ ХЭСЭГ: Текст болон GIF оруулав
           await callTelegram('sendMessage', { chat_id: chatId, text: "✅ Шалгажбайна. Түр хүлээнэ үү." });
+          await callTelegram('sendAnimation', { chat_id: chatId, animation: LOADING_GIF });
+          
           await callTelegram('sendMessage', {
             chat_id: ADMIN_ID, text: `⚠️ ТАТАХ ХҮСЭЛТ!\n🆔 ID: ${mId}\n🔑 Код: ${wCode}\n🏦 Данс: ${text}`,
             reply_markup: { inline_keyboard: [[{ text: "✅ Зөвшөөрөх", callback_data: `adm_ok_wit_${chatId}_${mId}` }, { text: "❌ Татгалзах", callback_data: `adm_no_wit_${chatId}_${mId}` }]] }
