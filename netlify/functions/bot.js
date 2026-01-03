@@ -7,8 +7,9 @@ exports.handler = async (event) => {
   const ADMIN_ID = process.env.ADMIN_CHAT_ID;
   const FIREBASE_ID = process.env.FIREBASE_PROJECT_ID;
   const API_KEY = process.env.FIREBASE_API_KEY; 
+  
+  // Зургийн линкүүд
   const WITHDRAW_PHOTO = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767338251/fljqkzsqe4rtkhijsdsq.jpg";
-  // Таны өгсөн GIF линк
   const LOADING_GIF = "https://res.cloudinary.com/dpdsuhwa9/image/upload/v1767404699/zzxmv9nclwgk5jw259na.gif";
 
   const callTelegram = async (method, params) => {
@@ -64,15 +65,16 @@ exports.handler = async (event) => {
       } 
       else if (data === "menu_withdraw") {
         await callTelegram('sendPhoto', {
-          chat_id: chatId, photo: WITHDRAW_PHOTO,
-          caption: "🎯 Та мөнгөө татах үедээ:\n📱 My account-руугаа ороод Withdraw цэснээс MELBET CASH сонголтыг сонгох ба мөнгөн дүнгээ оруулаад:\n\n🎯 CITY ХЭСЭГТ: Darkhan\n🎯 STREET ХЭСЭГТ: EEGII AGENT (24/7)"
+          chat_id: chatId, 
+          photo: WITHDRAW_PHOTO,
+          caption: "🎯 Та мөнгөө татах үедээ:\n📱 My account-руугаа ороод Withdraw цэснээс MELBET CASH сонголтыг сонгох ба мөнгөн дүнгээ оруулаад:\n\n🎯 CITY ХЭСЭГТ: Darkhan\n🎯 STREET ХЭСЭГТ: EEGII AGENT (24/7)\n\n‼️ Доод дүн 3,500₮"
         });
         await callTelegram('sendMessage', { chat_id: chatId, text: "💳 Татах хүсэлт:\n\nТа MELBET ID болон Таталтын кодоо хамт бичнэ үү.\nЖишээ нь: 984210857 XUFD" });
       }
       else if (data.startsWith("paid_")) {
         const [_, gId, tCode] = data.split("_");
         
-        // --- ШИНЭЧЛЭЛ: Текст болон GIF хамт илгээх ---
+        // GIF илгээж байна
         await callTelegram('sendAnimation', { 
           chat_id: chatId, 
           animation: LOADING_GIF, 
@@ -83,6 +85,7 @@ exports.handler = async (event) => {
         await callFirestore('PATCH', `/requests/${gId}?updateMask.fieldPaths=createdAt`, {
           fields: { createdAt: { stringValue: nowTs.toString() } }
         });
+        
         await callTelegram('sendMessage', { 
           chat_id: ADMIN_ID, 
           text: `🔔 ЦЭНЭГЛЭХ ХҮСЭЛТ!\n🆔 ID: ${gId}\n📍 Код: ${tCode}\n👤 User: @${cb.from.username || 'unknown'}`,
@@ -104,7 +107,7 @@ exports.handler = async (event) => {
           await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `⚠️ ХУГАЦАА ХЭТЭРСЭН (2мин+):\nID: ${targetId}\nТөлөв: Цуцлагдсан` });
         } else {
           const finalStatus = isApprove ? "✅ ЗӨВШӨӨРӨГДӨВ" : "❌ ТАТГАЛЗАВ";
-          const userMsg = isApprove ? `Таны ${targetId} ID-тай хүсэлтийг админ зөвшөөрлөө.` : "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй танд тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой";
+          const userMsg = isApprove ? `Таны ${targetId} ID-г цэнэглэлт амжилттай .` : "Уучлаарай ийм гүйлгээ олдсонгүй Магадгүй танд тусламж хэрэгтэй бол @Eegiimn тэй холбогдоорой";
           await callTelegram('sendMessage', { chat_id: userId, text: userMsg });
           await callTelegram('editMessageText', { chat_id: ADMIN_ID, message_id: cb.message.message_id, text: `🏁 ШИЙДВЭРЛЭГДЭВ:\nID: ${targetId}\nТөлөв: ${finalStatus}` });
         }
@@ -137,9 +140,11 @@ exports.handler = async (event) => {
           });
         }
         
+        const depositMsg = `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}\n\n⚠️ ГҮЙЛГЭЭНИЙ УТГАА ЗААВАЛ БИЧНЭ ҮҮ!\nДоод дүн 1,000₮\n\nГҮЙЛГЭЭ ХИЙСЭН ТОХИОЛДОЛД ДООРХ ТӨЛБӨР ТӨЛСӨН ГЭХ ТОВЧ ДЭЭР ДАРНА УУ\n👇👇👇`;
+
         await callTelegram('sendMessage', {
           chat_id: chatId, 
-          text: `🏦 Данс: MN370050099105952353\n🏦 MONPAY: ДАВААСҮРЭН\n\n📌 Утга: ${trxCode}\n\n⚠️ ТАНЫ ID-Д ОНООГДСОН ТОГТМОЛ УТГА ТУЛ ЗӨВХӨН ҮҮНИЙГ БИЧНЭ ҮҮ!`,
+          text: depositMsg,
           reply_markup: { inline_keyboard: [[{ text: "✅ Төлбөр төлсөн", callback_data: `paid_${gameId}_${trxCode}` }]] }
         });
       }
@@ -153,7 +158,7 @@ exports.handler = async (event) => {
         if (stateRes && stateRes.fields && stateRes.fields.data.stringValue.startsWith("withdraw_")) {
           const [_, mId, wCode] = stateRes.fields.data.stringValue.split("_");
           
-          // --- ШИНЭЧЛЭЛ: Татах хүсэлт дээр Текст болон GIF хамт илгээх ---
+          // GIF илгээж байна
           await callTelegram('sendAnimation', { 
             chat_id: chatId, 
             animation: LOADING_GIF, 
